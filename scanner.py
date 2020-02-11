@@ -5,6 +5,7 @@ from smartcard.util import toHexString, toBytes
 import sys
 import copy
 import logging
+from datetime import datetime
 from xml.dom.minidom import parse
 
 logging.basicConfig(level=logging.INFO,
@@ -27,19 +28,22 @@ class CardScanner:
 
     # options (will be overwritten by VerifClient settings);
     # change accordingly when run standalone;
-    # this non-regression engine is developed with 'Firefly Rev-D USIM 3.0' as model.
-    readerNumber = 0 # reader index starts from 0
+    # this non-regression engine is developed with 'DAKOTA 4.2' as model.
+    readerNumber = 1 # reader index starts from 0
     opt_chv1_disabled = True
-    opt_use_adm2 = True
-    opt_use_adm3 = True
+    opt_use_adm2 = False
+    opt_use_adm3 = False
     opt_use_adm4 = False
     opt_read_content_3g = False
-    adm1 = '933F57845F706921'
+    adm1 = '4331324131364442'
     adm2 = '933F57845F706921'
     adm3 = '933F57845F706921'
     adm4 = '933F57845F706921'
-    chv1 = '30303030FFFFFFFF'
-    chv2 = '31323334FFFFFFFF'
+    chv1 = '39333033FFFFFFFF'
+    chv2 = '39343438FFFFFFFF'
+
+    pcomOutFile = None
+    pcomOutFileName = 'script.pcom'
     
     # APDU params
     verify2gAdm1p1 = 0x00
@@ -107,6 +111,23 @@ class CardScanner:
         self.runAsModule = runAsModule
         self.fullScript = fullScript
 
+    def formatFileId(self, fileId):
+        if len(fileId) == 4:
+            formatted = fileId
+            return formatted
+        if len(fileId) == 8:
+            formatted = fileId[:4] + '/' + fileId[4:]
+            return formatted
+        if len(fileId) == 12:
+            formatted = fileId[:4] + '/' + fileId[4:8] + '/' + fileId[8:]
+            return formatted
+        if len(fileId) == 16:
+            formatted = fileId[:4] + '/' + fileId[4:8] + '/' + fileId[8:12] + '/' + fileId[12:]
+            return formatted
+        if len(fileId) == 20:
+            formatted = fileId[:4] + '/' + fileId[4:8] + '/' + fileId[8:12] + '/' + fileId[12:16] + '/' + fileId[16:]
+            return formatted
+
     def filterHex(self, hexString):
         temp = ''
         hexString = hexString.upper()
@@ -143,19 +164,23 @@ class CardScanner:
             self.connection = reader.createConnection()
             self.connection.connect()
             logger.info('%s; ATR: %s' % (reader, toHexString(self.connection.getATR())))
+            self.pcomOutFile.writelines("\n.POWER_ON")
+            self.pcomOutFile.writelines('\n')
             return 0
         except NoCardException:
-            logger.error('error initializing card')
+            logger.error('Error initializing card; may be wrong reader or card not inserted.')
             return -1
         
-    def sendApdu(self, apduHeader, apduData, print2screen=False):
+    def sendApdu(self, apduHeader, apduData, print2screen=False, out2Pcom=True):
         if type(apduHeader) == str:
             apduHeader = self.hexStringToBytes(apduHeader)
         if type(apduData) == str:
             apduData = self.hexStringToBytes(apduData)
         apdu = apduHeader
+        pcomOutString = toHexString(apdu).replace(' ', '')
         if apduData:
             apdu = apdu + apduData
+            pcomOutString = pcomOutString + ' ' + toHexString(apduData).replace(' ', '')
         
         if apduHeader[1] == 0x20:
             apduString = toHexString(apduHeader) + ' ' + self.filterHex(toHexString(apduData))
@@ -163,16 +188,24 @@ class CardScanner:
         
         if print2screen:
             print('Command: ' + toHexString(apdu))
+        
         response, sw1, sw2 = self.connection.transmit(apdu)
         
         if apduHeader[1] == 0x20:
             self.verifcodeLogBuffer['status_word'] = '%.2X %.2X' % (sw1, sw2)
             if sw1 != 0x90 and sw2 != 0x00:
                 self.verifcodeLogBuffer['verifcode_success'] = False
-        
+
         if response:
+            pcomOutString = pcomOutString + ' [' + toHexString(response).replace(' ', '') + ']'
             if print2screen:
                 print('Output : ' + toHexString(response))
+        
+        pcomOutString = pcomOutString + ' (%.2X%.2X)' % (sw1, sw2)
+        if out2Pcom:
+            self.pcomOutFile.writelines(pcomOutString)
+            self.pcomOutFile.writelines('\n')
+
         if print2screen:
             print('Status : %.2X %.2X' % (sw1, sw2))
             print()
@@ -182,23 +215,32 @@ class CardScanner:
         apduHeader = copy.deepcopy(self.readHeader2g)
         apduHeader[2] = int(number)
         apduHeader[3] = int(readMode)
-        response, sw1, sw2 = self.sendApdu(apduHeader, None)
+        response, sw1, sw2 = self.sendApdu(apduHeader, None, out2Pcom=False)
         return response, sw1, sw2
 
-    def cmdSelect2g(self, path, print2screen=False):
+    def cmdSelect2g(self, path, print2screen=False, out2Pcom=True):
         path = self.filterHex(path)
         i = 0
         while i < (len(path) - 4):
             if not print2screen:
-                self.sendApdu(self.select2g, path[i:i + 4])
+                if out2Pcom:
+                    self.sendApdu(self.select2g, path[i:i + 4])
+                else:
+                    self.sendApdu(self.select2g, path[i:i + 4], out2Pcom=False)
             else:
                 self.sendApdu(self.select2g, path[i:i + 4], print2screen=True)
             i += 4
         getResponse2g = copy.deepcopy(self.getResponse2g)
         if not print2screen:
-            response, sw1, sw2 = self.sendApdu(self.select2g, path[i:]) # shall return 9fxx
+            if out2Pcom:
+                response, sw1, sw2 = self.sendApdu(self.select2g, path[i:]) # shall return 9fxx
+            else:
+                response, sw1, sw2 = self.sendApdu(self.select2g, path[i:], out2Pcom=False) # shall return 9fxx
             getResponse2g[4] = sw2
-            response, sw1, sw2 = self.sendApdu(getResponse2g, None)
+            if out2Pcom:
+                response, sw1, sw2 = self.sendApdu(getResponse2g, None)
+            else:
+                response, sw1, sw2 = self.sendApdu(getResponse2g, None, out2Pcom=False)
         else:
             response, sw1, sw2 = self.sendApdu(self.select2g, path[i:], print2screen=True) # shall return 9fxx
             getResponse2g[4] = sw2
@@ -450,6 +492,7 @@ class CardScanner:
             self.printVerifCodeLog()
         else:
             logger.info('CHV1 is disabled; verification not required.')
+            self.pcomOutFile.writelines('; CHV1 is disabled. No CHV1 verification required.\n')
         
         self.initializeVerifcodeLogBuffer('Verify CHV2..')
         header = copy.deepcopy(self.verifyPIN2g)
@@ -460,8 +503,14 @@ class CardScanner:
         self.printVerifCodeLog()
 
     def proceed(self):
+        self.pcomOutFile = open(self.pcomOutFileName, 'w')
+
+        generation_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        self.pcomOutFile.writelines('; Generated with CardScanner on ' + generation_date + '\n')
+
         # power on
-        self.initSCard()
+        if self.initSCard() != 0:
+            sys.exit(-1)
 
         # when using VerifClient, go with user configuration
         if self.runAsModule:
@@ -473,7 +522,7 @@ class CardScanner:
 
         # execute ex-OT read header proprietary command
         supportReadHeader = True
-        cardFileList = []
+        cardFileList = ['3F00'] # initiate file list with MF
         curCardFilePath = ''
         curCardFileType = ''
         curCardDF = '3F00'
@@ -489,10 +538,10 @@ class CardScanner:
                 curCardFileID = curCardFileID.replace(" ", "")
                 curCardFilePath = curCardDF + curCardFileID
                 cardFileList.append(curCardFilePath)
-                sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(curCardFilePath)
+                sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(curCardFilePath, out2Pcom=False)
                 curCardFileType = sel2gResp[6]
                 if curCardFileType == 0x04:
-                    self.cmdSelect2g(curCardDF)
+                    self.cmdSelect2g(curCardDF, out2Pcom=False)
                 else:
                     if curCardDF == '3F00':
                         curCardDF = curCardDF + curCardFileID
@@ -508,7 +557,7 @@ class CardScanner:
                     path = self.filterHex(curCardDF)
                     i = 0
                     while i < (len(path) - 4):
-                        self.sendApdu(self.select2g, path[i:i + 4])
+                        self.sendApdu(self.select2g, path[i:i + 4], out2Pcom=False)
                         i += 4
                         curCardDF = path[0:i]
                         if curCardDF == '3F00':
@@ -536,6 +585,7 @@ class CardScanner:
             # create dictionary of file properties; this is done only once
             fileProperties = {'filePath': ef}
 
+            self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + '\n')
             sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(ef)
             
             # application DFs (USIM, ISIM, etc.) may fail to be selected for SIMBIOS in 2G mode;
@@ -589,40 +639,41 @@ class CardScanner:
                     fileProperties['2gAcc'] = '%0.2X %0.2X %0.2X' % (sel2gResp[8], sel2gResp[9], sel2gResp[10])
 
                     # file contents
-                    if fileProperties['fileStructure'] == 'linear fixed' or fileProperties['fileStructure'] == 'cyclic':
-                        recordList = []
-                        readableContent = True
-                        for i in range(fileProperties['numberOfRecord']):
-                            rdRec2gResp, rdRec2gSW1, rdRec2gSW2 = self.cmdReadRecord2g(i+1, self.READ_RECORD_ABSOLUTE, fileProperties['fileRecordSize'])
-                            if rdRec2gSW1 != 0x90 and rdRec2gSW2 != 00:
-                                # stop reading record, as EF may be invalidated and not readable
-                                readableContent = False
-                                # break
-                            recordList.append(toHexString(rdRec2gResp))
-                        if readableContent:
-                            fileProperties['fileContent'] = recordList
-                    
-                    if fileProperties['fileStructure'] == 'transparent':
-                        transparentContentBuffer = ''
-                        readableContent = True
-                        # handle length more than one APDU
-                        index = 0
-                        while index < fileProperties['fileSize']:
-                            if (index + self.MAX_RESPONSE_LEN) > fileProperties['fileSize']:
-                                tmpLen = fileProperties['fileSize'] - index
-                            else:
-                                tmpLen = self.MAX_RESPONSE_LEN
-                            rdBin2gResp, rdBin2gSW1, rdBin2gSW2 = self.cmdReadBinary2g(index, tmpLen)
-                            if rdBin2gSW1 != 0x90 and rdBin2gSW2 != 00:
-                                # stop reading binary content, as EF may be invalidated and not readable
-                                readableContent = False
-                            if transparentContentBuffer == '':
-                                transparentContentBuffer = toHexString(rdBin2gResp)
-                            else:
-                                transparentContentBuffer = transparentContentBuffer + ' ' + toHexString(rdBin2gResp)
-                            index += tmpLen
-                        if readableContent:
-                            fileProperties['fileContent'] = transparentContentBuffer
+                    if not self.opt_read_content_3g:
+                        if fileProperties['fileStructure'] == 'linear fixed' or fileProperties['fileStructure'] == 'cyclic':
+                            recordList = []
+                            readableContent = True
+                            for i in range(fileProperties['numberOfRecord']):
+                                rdRec2gResp, rdRec2gSW1, rdRec2gSW2 = self.cmdReadRecord2g(i+1, self.READ_RECORD_ABSOLUTE, fileProperties['fileRecordSize'])
+                                if rdRec2gSW1 != 0x90 and rdRec2gSW2 != 00:
+                                    # stop reading record, as EF may be invalidated and not readable
+                                    readableContent = False
+                                    # break
+                                recordList.append(toHexString(rdRec2gResp))
+                            if readableContent:
+                                fileProperties['fileContent'] = recordList
+                        
+                        if fileProperties['fileStructure'] == 'transparent':
+                            transparentContentBuffer = ''
+                            readableContent = True
+                            # handle length more than one APDU
+                            index = 0
+                            while index < fileProperties['fileSize']:
+                                if (index + self.MAX_RESPONSE_LEN) > fileProperties['fileSize']:
+                                    tmpLen = fileProperties['fileSize'] - index
+                                else:
+                                    tmpLen = self.MAX_RESPONSE_LEN
+                                rdBin2gResp, rdBin2gSW1, rdBin2gSW2 = self.cmdReadBinary2g(index, tmpLen)
+                                if rdBin2gSW1 != 0x90 and rdBin2gSW2 != 00:
+                                    # stop reading binary content, as EF may be invalidated and not readable
+                                    readableContent = False
+                                if transparentContentBuffer == '':
+                                    transparentContentBuffer = toHexString(rdBin2gResp)
+                                else:
+                                    transparentContentBuffer = transparentContentBuffer + ' ' + toHexString(rdBin2gResp)
+                                index += tmpLen
+                            if readableContent:
+                                fileProperties['fileContent'] = transparentContentBuffer
 
             fileDetails.append(fileProperties)
 
@@ -634,6 +685,7 @@ class CardScanner:
         # scan card in 3G mode
         efIndex = 0
         for ef in cardFileList:
+            self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + '\n')
             sel3gResp, sel3gSW1, sel3gSW2 = self.cmdSelect3g(ef)
 
             if sel3gSW1 == 0x62 and sel3gSW2 == 0x83:
@@ -743,11 +795,75 @@ class CardScanner:
 
             efIndex += 1
 
-        print('DEBUG -- fileDetails:')
-        for ef in fileDetails:
-            print(ef)
+        # print('DEBUG -- fileDetails:')
+        # for ef in fileDetails:
+        #     print(ef)
 
 # main program
 if __name__ == '__main__':
-    scanner = CardScanner(runAsModule=False, fullScript=True)
+    readerNumber = 0
+    adm1 = ''
+    adm2 = ''
+    adm3 = ''
+    adm4 = ''
+    chv1 = ''
+    chv2 = ''
+    pcomOutFileName = ''
+
+    import argparse
+    parser = argparse.ArgumentParser('scanner')
+    parser.add_argument("--readers", action="store_true", help="display list of available readers")
+    parser.add_argument("--reader", type=int, default=0, help="reader number")
+    parser.add_argument("--adm1", help="issuer security code 1 (initiate full script operation)")
+    parser.add_argument("--adm2", help="issuer security code 2")
+    parser.add_argument("--adm3", help="issuer security code 3")
+    parser.add_argument("--adm4", help="issuer security code 4")
+    parser.add_argument("--chv1", help="pin 1")
+    parser.add_argument("--chv2", help="pin 2")
+    parser.add_argument("-o", "--output", help="script output name")
+
+    args = parser.parse_args()
+
+    if args.readers:
+        readerIndex = 0
+        for reader in readers():
+            print("%s: %s" % (readerIndex, reader))
+            readerIndex += 1
+        sys.exit()
+    
+    readerNumber = args.reader
+    adm1 = args.adm1
+    adm2 = args.adm2
+    adm3 = args.adm3
+    adm4 = args.adm4
+    chv1 = args.chv1
+    chv2 = args.chv2
+    pcomOutFileName = args.output
+
+    scanner = CardScanner(runAsModule=False, fullScript=False)
+
+    scanner.readerNumber = readerNumber
+    if adm1:
+        scanner.fullScript = True
+        scanner.adm1 = adm1
+    if adm2:
+        scanner.opt_use_adm2 = True
+        scanner.adm2 = adm2
+    if adm3:
+        scanner.opt_use_adm3 = True
+        scanner.adm3 = adm3
+    if adm4:
+        scanner.opt_use_adm4 = True
+        scanner.adm4 = adm4
+    if chv1:
+        scanner.opt_chv1_disabled = False
+        scanner.chv1 = chv1
+    if chv2:
+        scanner.chv2 = chv2
+    
+    if pcomOutFileName:
+        scanner.pcomOutFileName = pcomOutFileName
+    else:
+        scanner.pcomOutFileName = 'script.pcom'
+
     scanner.proceed()
