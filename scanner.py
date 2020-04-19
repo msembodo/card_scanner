@@ -942,7 +942,7 @@ if __name__ == '__main__':
     parser.add_argument("--adm4", help="issuer security code 4")
     parser.add_argument("--chv1", help="pin 1")
     parser.add_argument("--chv2", help="pin 2")
-    parser.add_argument("--content3g", action="store_true", help="read EF content in 3G mode")
+    parser.add_argument("--content3g", action="store_true", help="read content in 3G mode")
     parser.add_argument("-o", "--output", help="script output name")
     
     args = parser.parse_args()
