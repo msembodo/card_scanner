@@ -99,13 +99,14 @@ class CardScanner:
     getResponse2g = [0xA0, 0xC0, 0x00, 0x00, 0x0F]
     readHeader2g = [0xA0, 0xE8, 0x00, 0x00, 0x17]
     verifyPIN2g = [0xA0, 0x20, 0x00, 0x00, 0x00]
-    verifyPIN3g = [0x00, 0x20, 0x00, 0x00, 0x00]
     readRecord2g = [0xA0, 0xB2, 0x00, 0x00, 0x00]
     readBinary2g = [0xA0, 0xB0, 0x00, 0x00, 0x00]
 
     select3g = [0x00, 0xA4, 0x00, 0x04, 0x02]
     getResponse3g = [0x00, 0xC0, 0x00, 0x00, 0x0F]
-
+    verifyPIN3g = [0x00, 0x20, 0x00, 0x00, 0x00]
+    readRecord3g = [0x00, 0xB2, 0x00, 0x00, 0x00]
+    readBinary3g = [0x00, 0xB0, 0x00, 0x00, 0x00]
 
     def __init__(self, runAsModule, fullScript):
         self.runAsModule = runAsModule
@@ -159,6 +160,9 @@ class CardScanner:
         return result
 
     def initSCard(self):
+        if len(readers()) == 0:
+            logger.error('No smartcard reader(s) detected.')
+            return -1
         reader = readers()[self.readerNumber]
         try:
             self.connection = reader.createConnection()
@@ -308,12 +312,34 @@ class CardScanner:
             response, sw1, sw2 = self.sendApdu(header, None, print2screen=True)
         return response, sw1, sw2
 
+    def cmdReadRecord3g(self, recNumber, mode, recSize, print2screen=False):
+        header = copy.deepcopy(self.readRecord3g)
+        header[2] = recNumber % 0x100
+        header[3] = mode % 0x100
+        header[4] = recSize % 0x100
+        if not print2screen:
+            response, sw1, sw2 = self.sendApdu(header, None)
+        else:
+            response, sw1, sw2 = self.sendApdu(header, None, print2screen=True)
+        return response, sw1, sw2
+
     def cmdReadBinary2g(self, offset, length, print2screen=False):
         header = copy.deepcopy(self.readBinary2g)
         # make sure offset is not longer than 64K-1
         header[2] = ((int(offset) % 0x10000) >> 8)
         header[3] = (int(offset) % 0x10000) & 0x00FF
         # make sure length is not longer than 255
+        header[4] = int(length) % 0x100
+        if not print2screen:
+            response, sw1, sw2 = self.sendApdu(header, None)
+        else:
+            response, sw1, sw2 = self.sendApdu(header, None, print2screen=True)
+        return response, sw1, sw2
+
+    def cmdReadBinary3g(self, offset, length, print2screen=False):
+        header = copy.deepcopy(self.readBinary3g)
+        header[2] = ((int(offset) % 0x10000) >> 8)
+        header[3] = (int(offset) % 0x10000) & 0x00FF
         header[4] = int(length) % 0x100
         if not print2screen:
             response, sw1, sw2 = self.sendApdu(header, None)
@@ -502,15 +528,71 @@ class CardScanner:
         self.sendApdu(header, self.chv2)
         self.printVerifCodeLog()
 
+    def pinVerification3g(self):
+        self.initializeVerifcodeLogBuffer('Verify ADM1..')
+        header = copy.deepcopy(self.verifyPIN3g)
+        header[2] = self.verify3gAdm1p1
+        header[3] = self.verify3gAdm1p2
+        header[4] = self.verify3gAdm1p3
+        self.sendApdu(header, self.adm1)
+        self.printVerifCodeLog()
+
+        if self.opt_use_adm2:
+            self.initializeVerifcodeLogBuffer('Verify ADM2..')
+            header = copy.deepcopy(self.verifyPIN3g)
+            header[2] = self.verify3gAdm2p1
+            header[3] = self.verify3gAdm2p2
+            header[4] = self.verify3gAdm2p3
+            self.sendApdu(header, self.adm2)
+            self.printVerifCodeLog()
+        
+        if self.opt_use_adm3:
+            self.initializeVerifcodeLogBuffer('Verify ADM3..')
+            header = copy.deepcopy(self.verifyPIN3g)
+            header[2] = self.verify3gAdm3p1
+            header[3] = self.verify3gAdm3p2
+            header[4] = self.verify3gAdm3p3
+            self.sendApdu(header, self.adm3)
+            self.printVerifCodeLog()
+
+        if self.opt_use_adm4:
+            self.initializeVerifcodeLogBuffer('Verify ADM4..')
+            header = copy.deepcopy(self.verifyPIN3g)
+            header[2] = self.verify3gAdm4p1
+            header[3] = self.verify3gAdm4p2
+            header[4] = self.verify3gAdm4p3
+            self.sendApdu(header, self.adm4)
+            self.printVerifCodeLog()
+
+        if not self.opt_chv1_disabled:
+            self.initializeVerifcodeLogBuffer('Verify Global PIN..')
+            header = copy.deepcopy(self.verifyPIN3g)
+            header[2] = self.verify3gGlobalPin1p1
+            header[3] = self.verify3gGlobalPin1p2
+            header[4] = self.verify3gGlobalPin1p3
+            self.sendApdu(header, self.chv1)
+            self.printVerifCodeLog()
+        else:
+            logger.info('GPIN is disabled. No GPIN verification required.')
+            self.pcomOutFile.writelines('; GPIN is disabled. No GPIN verification required.\n')
+
+        self.initializeVerifcodeLogBuffer('Verify Local PIN..')
+        header = copy.deepcopy(self.verifyPIN3g)
+        header[2] = self.verify3gLocalPin1p1
+        header[3] = self.verify3gLocalPin1p2
+        header[4] = self.verify3gLocalPin1p3
+        self.sendApdu(header, self.chv2)
+        self.printVerifCodeLog()
+
     def proceed(self):
         self.pcomOutFile = open(self.pcomOutFileName, 'w')
+        
+        # power on
+        if not self.initSCard() == 0:
+            sys.exit(-1)
 
         generation_date = datetime.now().strftime("%Y-%m-%d %H:%M")
         self.pcomOutFile.writelines('; Generated with CardScanner on ' + generation_date + '\n')
-
-        # power on
-        if self.initSCard() != 0:
-            sys.exit(-1)
 
         # when using VerifClient, go with user configuration
         if self.runAsModule:
@@ -680,7 +762,9 @@ class CardScanner:
         # cycle card
         self.initSCard()
 
-        # TODO: verify security codes (3G) for 'full' script
+        # verify security codes (3G) for 'full' script
+        if self.fullScript:
+            self.pinVerification3g()
 
         # scan card in 3G mode
         efIndex = 0
@@ -791,7 +875,45 @@ class CardScanner:
                             fileDetails[efIndex]['sfi'] = '%0.2X' % (sfiValueShifted)
 
                     # access condition
+
                     # file contents
+                    if self.opt_read_content_3g:
+                        if fileDetails[efIndex]['fileStructure'] == 'linear fixed' or fileDetails[efIndex]['fileStructure'] == 'cyclic':
+                            recordList = []
+                            readableContent = True
+                            for i in range(fileDetails[efIndex]['numberOfRecord']):
+                                rdRec3gResp, rdRec3gSW1, rdRec3gSW2 = self.cmdReadRecord3g(i+1, self.READ_RECORD_ABSOLUTE, fileDetails[efIndex]['fileRecordSize'])
+                                if rdRec3gSW1 != 0x90 and rdRec3gSW2 != 00:
+                                    # stop reading record, as EF may be invalidated and not readable
+                                    readableContent = False
+                                    # break
+                                recordList.append(toHexString(rdRec3gResp))
+                            if readableContent:
+                                if not 'fileContent' in fileDetails[efIndex]:
+                                    fileDetails[efIndex]['fileContent'] = recordList
+
+                        if fileDetails[efIndex]['fileStructure'] == 'transparent':
+                            transparentContentBuffer = ''
+                            readableContent = True
+                            # handle length more than one APDU
+                            index = 0
+                            while index < fileDetails[efIndex]['fileSize']:
+                                if (index + self.MAX_RESPONSE_LEN) > fileDetails[efIndex]['fileSize']:
+                                    tmpLen = fileDetails[efIndex]['fileSize'] - index
+                                else:
+                                    tmpLen = self.MAX_RESPONSE_LEN
+                                rdBin3gResp, rdBin3gSW1, rdBin3gSW2 = self.cmdReadBinary3g(index, tmpLen)
+                                if rdBin3gSW1 != 0x90 and rdBin3gSW2 != 00:
+                                    # stop reading binary content, as EF may be invalidated and not readable
+                                    readableContent = False
+                                if transparentContentBuffer == '':
+                                    transparentContentBuffer = toHexString(rdBin3gResp)
+                                else:
+                                    transparentContentBuffer = transparentContentBuffer + ' ' + toHexString(rdBin3gResp)
+                                index += tmpLen
+                            if readableContent:
+                                if not 'fileContent' in fileDetails[efIndex]:
+                                    fileDetails[efIndex]['fileContent'] = transparentContentBuffer
 
             efIndex += 1
 
@@ -820,15 +942,19 @@ if __name__ == '__main__':
     parser.add_argument("--adm4", help="issuer security code 4")
     parser.add_argument("--chv1", help="pin 1")
     parser.add_argument("--chv2", help="pin 2")
+    parser.add_argument("--content3g", action="store_true", help="read EF content in 3G mode")
     parser.add_argument("-o", "--output", help="script output name")
-
+    
     args = parser.parse_args()
 
     if args.readers:
-        readerIndex = 0
-        for reader in readers():
-            print("%s: %s" % (readerIndex, reader))
-            readerIndex += 1
+        if not len(readers()) == 0:
+            readerIndex = 0
+            for reader in readers():
+                print("%s: %s" % (readerIndex, reader))
+                readerIndex += 1
+        else:
+            logger.error('No smartcard reader(s) detected.')
         sys.exit()
     
     readerNumber = args.reader
@@ -865,5 +991,8 @@ if __name__ == '__main__':
         scanner.pcomOutFileName = pcomOutFileName
     else:
         scanner.pcomOutFileName = 'script.pcom'
+
+    if args.content3g:
+        scanner.opt_read_content_3g = True
 
     scanner.proceed()
