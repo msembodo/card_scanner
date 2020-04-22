@@ -45,6 +45,8 @@ class CardScanner:
     pcomOutFile = None
     pcomOutFileName = 'script.pcom'
     
+    fileSystemXml = ''
+
     # APDU params
     verify2gAdm1p1 = 0x00
     verify2gAdm1p2 = 0x00 # default = 0x00; SIMBIOS = 0x14
@@ -584,6 +586,32 @@ class CardScanner:
         self.sendApdu(header, self.chv2)
         self.printVerifCodeLog()
 
+    def parseFileSystemXml(self, fileSystemXml):
+        try:
+            DOMTree = parse(fileSystemXml)
+        except IOError, e:
+            return False, 'Error parsing file system xml: ' + str(e.strerror), None
+        
+        logger.info('Populating file system from input xml')
+
+        arrayOfDBFile = DOMTree.documentElement
+        dbFiles = arrayOfDBFile.getElementsByTagName('DBFile')
+
+        fileSystemList = []
+
+        for dbFile in dbFiles:
+            name = dbFile.getElementsByTagName('NAME')[0].childNodes[0].data
+            fileId = dbFile.getElementsByTagName('FILEID')[0].childNodes[0].data
+            try:
+                path = dbFile.getElementsByTagName('PATH')[0].childNodes[0].data
+            except IndexError:
+                path = ''
+
+            dbFileDict = {'name': name.encode('ascii', 'ignore'), 'absolutePath': (path.replace('|', '') + fileId).encode('ascii', 'ignore')}
+            fileSystemList.append(dbFileDict)
+
+        return True, 'success populating file system', fileSystemList
+
     def proceed(self):
         self.pcomOutFile = open(self.pcomOutFileName, 'w')
         
@@ -650,16 +678,27 @@ class CardScanner:
                     # read header is not supported by the card
                     supportReadHeader = False
                     logger.error('Error reading header at ' + curCardFilePath) # indicate where it fails reading header and exit
-                    sys.exit(-1)
-                    # break
+                    break
             curCardIndex = readIndex
             readIndex += 1
         
         if not supportReadHeader:
-            # TODO: populate cardFileList from CSV for USIM 1.x or SIMBIOS cards (and reset list)
-            pass
+            # populate cardFileList from CSV for USIM 1.x or SIMBIOS cards
+            cardFileList = [] # reset list
+            if self.fileSystemXml != '':
+                parseFileSystemOk, parseFileSystemMsg, fileSystemList = self.parseFileSystemXml(self.fileSystemXml)
+                if parseFileSystemOk:
+                    for ef in fileSystemList:
+                        cardFileList.append(ef['absolutePath'])
+                else:
+                    logger.error(parseFileSystemMsg)
+                    sys.exit(-1) # or return with message
 
         # TODO: look-up CSV for file names and create list of mappings
+
+        if len(cardFileList) == 0:
+            logger.error('Please provide correct file system xml')
+            sys.exit(-1) # or return with message
 
         # initialize list that contains all files in card and their parameters
         fileDetails = []
@@ -945,6 +984,7 @@ if __name__ == '__main__':
     parser.add_argument("--chv1", help="pin 1")
     parser.add_argument("--chv2", help="pin 2")
     parser.add_argument("--content3g", action="store_true", help="read content in 3G mode")
+    parser.add_argument("-i", "--input", help="file system xml")
     parser.add_argument("-o", "--output", help="script output name")
     
     args = parser.parse_args()
@@ -967,6 +1007,7 @@ if __name__ == '__main__':
     chv1 = args.chv1
     chv2 = args.chv2
     pcomOutFileName = args.output
+    fileSystemXml = args.input
 
     scanner = CardScanner(runAsModule=False, fullScript=False)
 
@@ -993,6 +1034,9 @@ if __name__ == '__main__':
         scanner.pcomOutFileName = pcomOutFileName
     else:
         scanner.pcomOutFileName = 'script.pcom'
+
+    if fileSystemXml:
+        scanner.fileSystemXml = fileSystemXml
 
     if args.content3g:
         scanner.opt_read_content_3g = True
