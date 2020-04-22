@@ -18,3 +18,7 @@ dist/
 *.pyc
 *.log
 *.xml
+
+# ignore pcom & out files
+*.txt
+*.pcom
