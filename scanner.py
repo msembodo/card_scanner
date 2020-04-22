@@ -647,14 +647,16 @@ class CardScanner:
                         else:
                             readIndex = prevCardIndex + 1
                 else:
+                    # read header is not supported by the card
                     supportReadHeader = False
-                    logger.error('Error reading header!') # read header is not supported by the card
-                    break
+                    logger.error('Error reading header at ' + curCardFilePath) # indicate where it fails reading header and exit
+                    sys.exit(-1)
+                    # break
             curCardIndex = readIndex
             readIndex += 1
         
         if not supportReadHeader:
-            # TODO: populate cardFileList from CSV for USIM 1.x or SIMBIOS cards
+            # TODO: populate cardFileList from CSV for USIM 1.x or SIMBIOS cards (and reset list)
             pass
 
         # TODO: look-up CSV for file names and create list of mappings
