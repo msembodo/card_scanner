@@ -1,5 +1,5 @@
 from __future__ import print_function
-from smartcard.Exceptions import NoCardException
+from smartcard.Exceptions import NoCardException, CardConnectionException
 from smartcard.System import readers
 from smartcard.util import toHexString, toBytes
 import sys
@@ -178,44 +178,48 @@ class CardScanner:
             return -1
         
     def sendApdu(self, apduHeader, apduData, print2screen=False, out2Pcom=True):
-        if type(apduHeader) == str:
-            apduHeader = self.hexStringToBytes(apduHeader)
-        if type(apduData) == str:
-            apduData = self.hexStringToBytes(apduData)
-        apdu = apduHeader
-        pcomOutString = toHexString(apdu).replace(' ', '')
-        if apduData:
-            apdu = apdu + apduData
-            pcomOutString = pcomOutString + ' ' + toHexString(apduData).replace(' ', '')
-        
-        if apduHeader[1] == 0x20:
-            apduString = toHexString(apduHeader) + ' ' + self.filterHex(toHexString(apduData))
-            self.verifcodeLogBuffer['apdu_string'] = apduString
-        
-        if print2screen:
-            print('Command: ' + toHexString(apdu))
-        
-        response, sw1, sw2 = self.connection.transmit(apdu)
-        
-        if apduHeader[1] == 0x20:
-            self.verifcodeLogBuffer['status_word'] = '%.2X %.2X' % (sw1, sw2)
-            if sw1 != 0x90 and sw2 != 0x00:
-                self.verifcodeLogBuffer['verifcode_success'] = False
-
-        if response:
-            pcomOutString = pcomOutString + ' [' + toHexString(response).replace(' ', '') + ']'
+        try:
+            if type(apduHeader) == str:
+                apduHeader = self.hexStringToBytes(apduHeader)
+            if type(apduData) == str:
+                apduData = self.hexStringToBytes(apduData)
+            apdu = apduHeader
+            pcomOutString = toHexString(apdu).replace(' ', '')
+            if apduData:
+                apdu = apdu + apduData
+                pcomOutString = pcomOutString + ' ' + toHexString(apduData).replace(' ', '')
+            
+            if apduHeader[1] == 0x20:
+                apduString = toHexString(apduHeader) + ' ' + self.filterHex(toHexString(apduData))
+                self.verifcodeLogBuffer['apdu_string'] = apduString
+            
             if print2screen:
-                print('Output : ' + toHexString(response))
-        
-        pcomOutString = pcomOutString + ' (%.2X%.2X)' % (sw1, sw2)
-        if out2Pcom:
-            self.pcomOutFile.writelines(pcomOutString)
-            self.pcomOutFile.writelines('\n')
+                print('Command: ' + toHexString(apdu))
+            
+            response, sw1, sw2 = self.connection.transmit(apdu)
+            
+            if apduHeader[1] == 0x20:
+                self.verifcodeLogBuffer['status_word'] = '%.2X %.2X' % (sw1, sw2)
+                if sw1 != 0x90 and sw2 != 0x00:
+                    self.verifcodeLogBuffer['verifcode_success'] = False
 
-        if print2screen:
-            print('Status : %.2X %.2X' % (sw1, sw2))
-            print()
-        return response, sw1, sw2
+            if response:
+                pcomOutString = pcomOutString + ' [' + toHexString(response).replace(' ', '') + ']'
+                if print2screen:
+                    print('Output : ' + toHexString(response))
+            
+            pcomOutString = pcomOutString + ' (%.2X%.2X)' % (sw1, sw2)
+            if out2Pcom:
+                self.pcomOutFile.writelines(pcomOutString)
+                self.pcomOutFile.writelines('\n')
+
+            if print2screen:
+                print('Status : %.2X %.2X' % (sw1, sw2))
+                print()
+            return response, sw1, sw2
+        
+        except CardConnectionException:
+            return -1, 'A communications error with the smart card has been detected', None
 
     def cmdReadHeader(self, number, readMode):
         apduHeader = copy.deepcopy(self.readHeader2g)
@@ -768,11 +772,15 @@ class CardScanner:
                             readableContent = True
                             for i in range(fileProperties['numberOfRecord']):
                                 rdRec2gResp, rdRec2gSW1, rdRec2gSW2 = self.cmdReadRecord2g(i+1, self.READ_RECORD_ABSOLUTE, fileProperties['fileRecordSize'])
-                                if rdRec2gSW1 != 0x90 and rdRec2gSW2 != 00:
-                                    # stop reading record, as EF may be invalidated and not readable
-                                    readableContent = False
-                                    # break
-                                recordList.append(toHexString(rdRec2gResp))
+                                if rdRec2gResp == -1: # possible due to reader communication error
+                                    logger.error(rdRec2gSW1) # rdRec2gSW1 contains the error
+                                    sys.exit(-1) # or return with message
+                                else:
+                                    if rdRec2gSW1 != 0x90 and rdRec2gSW2 != 00:
+                                        # stop reading record, as EF may be invalidated and not readable
+                                        readableContent = False
+                                        # break
+                                    recordList.append(toHexString(rdRec2gResp))
                             if readableContent:
                                 fileProperties['fileContent'] = recordList
                         
@@ -787,9 +795,13 @@ class CardScanner:
                                 else:
                                     tmpLen = self.MAX_RESPONSE_LEN
                                 rdBin2gResp, rdBin2gSW1, rdBin2gSW2 = self.cmdReadBinary2g(index, tmpLen)
-                                if rdBin2gSW1 != 0x90 and rdBin2gSW2 != 00:
-                                    # stop reading binary content, as EF may be invalidated and not readable
-                                    readableContent = False
+                                if rdBin2gResp == -1: # possible due to reader communication error
+                                    logger.error(rdBin2gSW1) # rdBin2gSW1 contains the error
+                                    sys.exit(-1) # or return with message
+                                else:
+                                    if rdBin2gSW1 != 0x90 and rdBin2gSW2 != 00:
+                                        # stop reading binary content, as EF may be invalidated and not readable
+                                        readableContent = False
                                 if transparentContentBuffer == '':
                                     transparentContentBuffer = toHexString(rdBin2gResp)
                                 else:
