@@ -596,7 +596,7 @@ class CardScanner:
         except IOError, e:
             return False, 'Error parsing file system xml: ' + str(e.strerror), None
         
-        logger.info('Populating file system from input xml')
+        logger.info('Parsing input xml')
 
         arrayOfDBFile = DOMTree.documentElement
         dbFiles = arrayOfDBFile.getElementsByTagName('DBFile')
@@ -615,6 +615,14 @@ class CardScanner:
             fileSystemList.append(dbFileDict)
 
         return True, 'success populating file system', fileSystemList
+
+    def getNameByPath(self, fileSystemList, path):
+        efName = ''
+        for fsDict in fileSystemList:
+            if fsDict['absolutePath'] == path:
+                efName = fsDict['name']
+                break
+        return efName
 
     def proceed(self):
         self.pcomOutFile = open(self.pcomOutFileName, 'w')
@@ -686,19 +694,20 @@ class CardScanner:
             curCardIndex = readIndex
             readIndex += 1
         
+        fileSystemXmlAvailable = False
+        if self.fileSystemXml != '':
+            fileSystemXmlAvailable = True
+            parseFileSystemOk, parseFileSystemMsg, fileSystemList = self.parseFileSystemXml(self.fileSystemXml)
+            if not parseFileSystemOk:
+                logger.error(parseFileSystemMsg)
+                sys.exit(-1) # or return with message
         if not supportReadHeader:
-            # populate cardFileList from CSV for USIM 1.x or SIMBIOS cards
+            # populate cardFileList from input xml for USIM 1.x or SIMBIOS cards
             cardFileList = [] # reset list
-            if self.fileSystemXml != '':
-                parseFileSystemOk, parseFileSystemMsg, fileSystemList = self.parseFileSystemXml(self.fileSystemXml)
-                if parseFileSystemOk:
-                    for ef in fileSystemList:
-                        cardFileList.append(ef['absolutePath'])
-                else:
-                    logger.error(parseFileSystemMsg)
-                    sys.exit(-1) # or return with message
-
-        # TODO: look-up CSV for file names and create list of mappings
+            logger.info('Populating file system from input xml')
+            if fileSystemXmlAvailable:
+                for ef in fileSystemList:
+                    cardFileList.append(ef['absolutePath'])
 
         if len(cardFileList) == 0:
             logger.error('Please provide correct file system xml')
@@ -711,9 +720,14 @@ class CardScanner:
         for ef in cardFileList:
             # create dictionary of file properties; this is done only once
             fileProperties = {'filePath': ef}
+            if fileSystemXmlAvailable:
+                # look-up dictionary for file names
+                fileProperties['fileName'] = self.getNameByPath(fileSystemList, ef)
+            else:
+                fileProperties['fileName'] = ''
 
             if self.formatFileId(ef):
-                self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + '\n')
+                self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + ': ' + fileProperties['fileName'] + '\n')
             else:
                 logger.error('TypeError: probably found AID instead of DF (or path is too long)')
                 sys.exit(-1) # or return with message
@@ -826,7 +840,7 @@ class CardScanner:
         # scan card in 3G mode
         efIndex = 0
         for ef in cardFileList:
-            self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + '\n')
+            self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + ': ' + fileDetails[efIndex]['fileName'] + '\n')
             sel3gResp, sel3gSW1, sel3gSW2 = self.cmdSelect3g(ef)
 
             if sel3gSW1 == 0x62 and sel3gSW2 == 0x83:
