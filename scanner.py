@@ -712,7 +712,11 @@ class CardScanner:
             # create dictionary of file properties; this is done only once
             fileProperties = {'filePath': ef}
 
-            self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + '\n')
+            if self.formatFileId(ef):
+                self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + '\n')
+            else:
+                logger.error('TypeError: probably found AID instead of DF (or path is too long)')
+                sys.exit(-1) # or return with message
             sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(ef)
             
             # application DFs (USIM, ISIM, etc.) may fail to be selected for SIMBIOS in 2G mode;
