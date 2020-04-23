@@ -103,6 +103,7 @@ class CardScanner:
     verifyPIN2g = [0xA0, 0x20, 0x00, 0x00, 0x00]
     readRecord2g = [0xA0, 0xB2, 0x00, 0x00, 0x00]
     readBinary2g = [0xA0, 0xB0, 0x00, 0x00, 0x00]
+    readOsLock = [0xA0, 0xBC, 0x00, 0x00, 0x01]
 
     select3g = [0x00, 0xA4, 0x00, 0x04, 0x02]
     getResponse3g = [0x00, 0xC0, 0x00, 0x00, 0x0F]
@@ -200,7 +201,7 @@ class CardScanner:
             
             if apduHeader[1] == 0x20:
                 self.verifcodeLogBuffer['status_word'] = '%.2X %.2X' % (sw1, sw2)
-                if sw1 != 0x90 and sw2 != 0x00:
+                if not (sw1 == 0x90 and sw2 == 0x00):
                     self.verifcodeLogBuffer['verifcode_success'] = False
 
             if response:
@@ -227,6 +228,24 @@ class CardScanner:
         apduHeader[3] = int(readMode)
         response, sw1, sw2 = self.sendApdu(apduHeader, None, out2Pcom=False)
         return response, sw1, sw2
+
+    def countLockBuffer(self):
+        lockOffsetCount = 0
+        while lockOffsetCount < 256:
+            sw1, sw2 = self.cmdReadOsLock(lockOffsetCount, False)
+            if not (sw1 == 0x90 and sw2 == 0x00):
+                break
+            lockOffsetCount += 1
+        return lockOffsetCount
+
+    def cmdReadOsLock(self, offset, printMode):
+        apduHeader = copy.deepcopy(self.readOsLock)
+        apduHeader[3] = offset
+        if printMode:
+            response, sw1, sw2 = self.sendApdu(apduHeader, None, out2Pcom=True)
+        else:
+            response, sw1, sw2 = self.sendApdu(apduHeader, None, out2Pcom=False)
+        return sw1, sw2
 
     def cmdSelect2g(self, path, print2screen=False, out2Pcom=True):
         path = self.filterHex(path)
@@ -717,6 +736,7 @@ class CardScanner:
         fileDetails = []
 
         # scan card in 2G mode
+        logger.info('Scanning in 2G mode')
         for ef in cardFileList:
             # create dictionary of file properties; this is done only once
             fileProperties = {'filePath': ef}
@@ -838,6 +858,7 @@ class CardScanner:
             self.pinVerification3g()
 
         # scan card in 3G mode
+        logger.info('Scanning in 3G mode')
         efIndex = 0
         for ef in cardFileList:
             self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + ': ' + fileDetails[efIndex]['fileName'] + '\n')
@@ -988,6 +1009,18 @@ class CardScanner:
 
             efIndex += 1
 
+        # read OS locks
+        # cycle card
+        self.initSCard()
+        logger.info('Reading OS locks')
+        self.pcomOutFile.writelines('; OS locks\n')
+
+        osLockBufferCount = self.countLockBuffer()
+        lockOffset = 0
+        while lockOffset < osLockBufferCount:
+            self.cmdReadOsLock(lockOffset, True)
+            lockOffset += 1
+        
         # print('DEBUG -- fileDetails:')
         # for ef in fileDetails:
         #     print(ef)
