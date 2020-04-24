@@ -7,6 +7,7 @@ import copy
 import logging
 from datetime import datetime
 from xml.dom.minidom import parse
+import json
 
 logging.basicConfig(level=logging.INFO,
                     format="[%(asctime)s] [%(levelname)s] %(message)s",
@@ -46,6 +47,7 @@ class CardScanner:
     pcomOutFileName = 'script.pcom'
     
     fileSystemXml = ''
+    fileSystemOutJson = ''
 
     # APDU params
     verify2gAdm1p1 = 0x00
@@ -643,6 +645,16 @@ class CardScanner:
                 break
         return efName
 
+    def swapIccid(self, iccid):
+        charList = iccid.split()
+        swappedIccid = ''
+        for byteChar in charList:
+            byteChar = list(byteChar)
+            byteChar[0], byteChar[1] = byteChar[1], byteChar[0]
+            swappedIccid += ''.join(byteChar)
+        
+        return swappedIccid
+
     def proceed(self):
         self.pcomOutFile = open(self.pcomOutFileName, 'w')
         
@@ -650,7 +662,8 @@ class CardScanner:
         if not self.initSCard() == 0:
             sys.exit(-1)
 
-        generation_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        dateTimeNow = datetime.now()
+        generation_date = dateTimeNow.strftime("%Y-%m-%d %H:%M")
         self.pcomOutFile.writelines('; Generated with CardScanner on ' + generation_date + '\n')
 
         # when using VerifClient, go with user configuration
@@ -1022,8 +1035,18 @@ class CardScanner:
             lockOffset += 1
         
         # print('DEBUG -- fileDetails:')
-        # for ef in fileDetails:
-        #     print(ef)
+        # print(fileDetails)
+        
+        # dump file system to json
+        if self.fullScript:
+            for ef in fileDetails:
+                if ef['filePath'] == '3F002FE2':
+                    iccid = ef['fileContent']
+                    break
+            outTimeStamp = dateTimeNow.strftime("%Y%m%d%H%M")
+            self.fileSystemOutJson = self.swapIccid(iccid) + '__' + outTimeStamp + '.json'
+            with open(self.fileSystemOutJson, 'w') as json_file:
+                json.dump(fileDetails, json_file, indent=2)
 
 # main program
 if __name__ == '__main__':
