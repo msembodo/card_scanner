@@ -48,6 +48,8 @@ class CardScanner:
     
     fileSystemXml = ''
     fileSystemOutJson = ''
+    fileSystemOutHtml = ''
+    htmlFile = None
 
     # APDU params
     verify2gAdm1p1 = 0x00
@@ -655,6 +657,95 @@ class CardScanner:
         
         return swappedIccid
 
+    def createDocumentHeader(self):
+        self.htmlFile.writelines("""<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+            <html>
+            <head>
+            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+            <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+            <title>Card Report</title>
+            <style type="text/css">
+            html,
+            body {
+                height: 100%;
+            }
+            html {
+                font-size: 16px;
+            }
+            body {
+                margin: 0px;
+                padding: 0px;
+                overflow-x: hidden;
+                min-width: 320px;
+                background: #F9F9F9;
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 13px;
+                line-height: 1.33;
+                color: #212121;
+                font-smoothing: antialiased;
+            }
+            div {
+                margin-top: 10px;
+                margin-left: 40px;
+                margin-right: 40px;
+            }
+            h1,
+            h2,
+            h3,
+            h4,
+            h5 {
+                font-family: Arial, Helvetica, sans-serif;
+                line-height: 1.33em;
+                margin: calc(2rem -  0.165em ) 0em 1rem;
+                font-weight: 400;
+                padding: 0em;
+            }
+            table {
+                border-collapse: collapse;
+            }
+            th,
+            td {
+                border: 2px solid black;
+                padding: 4px;
+            }
+            th.error {
+                background-color: firebrick;
+                color: #F9F9F9;
+            }
+            th.warning {
+                background-color: darkorange;
+                color: #F9F9F9;
+            }
+            td.error {
+                background-color: #FDEDEC;
+                color: #17202A;
+            }
+            td.warning {
+                background-color: #FEF9E7;
+                color: #17202A;
+            }
+            td.data {
+                font-family: consolas, Monaco, monospace;
+                font-size: 12px;
+            }
+            ul {
+                margin: 0px;
+                padding: 15px;
+            }
+            </style>
+            </head>
+            <body>""")
+
+    def createDocumentFooter(self):
+        self.htmlFile.writelines('\n</body></html>')
+
+    def createTableHeader(self):
+        self.htmlFile.writelines('\n<div><table><tbody>')
+
+    def createTableFooter(self):
+        self.htmlFile.writelines('\n</tbody></table></div>')
+
     def proceed(self):
         self.pcomOutFile = open(self.pcomOutFileName, 'w')
         
@@ -1047,6 +1138,54 @@ class CardScanner:
             self.fileSystemOutJson = self.swapIccid(iccid) + '__' + outTimeStamp + '.json'
             with open(self.fileSystemOutJson, 'w') as json_file:
                 json.dump(fileDetails, json_file, indent=2)
+
+            # dump file system to html
+            self.fileSystemOutHtml = self.swapIccid(iccid) + '__' + outTimeStamp + '.html'
+            with open(self.fileSystemOutHtml, 'w') as self.htmlFile:
+                # self.htmlFile = open(self.fileSystemOutHtml, 'w')
+                self.createDocumentHeader()
+                self.htmlFile.writelines('\n<div><h1>Card Serial #: ' + self.swapIccid(iccid) + '</h1></div>')
+                for ef in fileDetails:
+                    self.htmlFile.writelines('\n<div><h2>' + self.formatFileId(ef['filePath']) + ': ' + ef['fileName'] + '</h2></div>')
+                    self.createTableHeader()
+                    self.htmlFile.writelines('\n<tr><td>File type</td>')
+                    self.htmlFile.writelines('<td>' + ef['fileType'] + '</td></tr>')
+                    if ef.has_key('sfi'):
+                        self.htmlFile.writelines('\n<tr><td>SFI</td>')
+                        self.htmlFile.writelines('<td>' + ef['sfi'] + '</td></tr>')
+                    if ef.has_key('fileStructure'):
+                        self.htmlFile.writelines('\n<tr><td>File structure</td>')
+                        self.htmlFile.writelines('<td>' + ef['fileStructure'] + '</td></tr>')
+                    if ef.has_key('2gAcc'):
+                        self.htmlFile.writelines('\n<tr><td>2G access condition</td>')
+                        self.htmlFile.writelines('<td>' + ef['2gAcc'] + '</td></tr>')
+                    self.htmlFile.writelines('\n<tr><td>File control parameter</td>')
+                    self.htmlFile.writelines('<td>' + ef['3gGetResponse'] + '</td></tr>')
+                    if ef.has_key('fileSize'):
+                        self.htmlFile.writelines('\n<tr><td>File size</td>')
+                        self.htmlFile.writelines('<td>' + str(ef['fileSize']) + '</td></tr>')
+                    if ef.has_key('fileRecordSize'):
+                        self.htmlFile.writelines('\n<tr><td>Record size</td>')
+                        self.htmlFile.writelines('<td>' + str(ef['fileRecordSize']) + '</td></tr>')
+                    if ef.has_key('numberOfRecord'):
+                        self.htmlFile.writelines('\n<tr><td>Number of record</td>')
+                        self.htmlFile.writelines('<td>' + str(ef['numberOfRecord']) + '</td></tr>')
+                    self.createTableFooter()
+                    if ef.has_key('fileContent'):
+                        self.htmlFile.writelines('\n<div>File content:</div>')
+                        self.createTableHeader()
+                        if ef['fileStructure'] == 'transparent':
+                            self.htmlFile.writelines('\n<tr><td class="data">' + ef['fileContent'] + '</td></tr>')
+                        if ef['fileStructure'] == 'linear fixed' or ef['fileStructure'] == 'cyclic':
+                            recordNumber = 0
+                            for record in ef['fileContent']:
+                                recordNumber += 1
+                                self.htmlFile.writelines('\n<tr><td>' + str(recordNumber) + '</td>')
+                                self.htmlFile.writelines('<td class="data">' + record + '</td></tr>')
+                        self.createTableFooter()
+                    
+                self.htmlFile.writelines('\n<div><i>Generated with CardScanner on ' + generation_date + '</i></div>')
+                self.createDocumentFooter()
 
 # main program
 if __name__ == '__main__':
