@@ -1148,8 +1148,9 @@ class CardScanner:
                 for ef in fileDetails:
                     self.htmlFile.writelines('\n<div><h2>' + self.formatFileId(ef['filePath']) + ': ' + ef['fileName'] + '</h2></div>')
                     self.createTableHeader()
-                    self.htmlFile.writelines('\n<tr><td>File type</td>')
-                    self.htmlFile.writelines('<td>' + ef['fileType'] + '</td></tr>')
+                    if ef.has_key('fileType'):
+                        self.htmlFile.writelines('\n<tr><td>File type</td>')
+                        self.htmlFile.writelines('<td>' + ef['fileType'] + '</td></tr>')
                     if ef.has_key('sfi'):
                         self.htmlFile.writelines('\n<tr><td>SFI</td>')
                         self.htmlFile.writelines('<td>' + ef['sfi'] + '</td></tr>')
@@ -1159,8 +1160,9 @@ class CardScanner:
                     if ef.has_key('2gAcc'):
                         self.htmlFile.writelines('\n<tr><td>2G access condition</td>')
                         self.htmlFile.writelines('<td>' + ef['2gAcc'] + '</td></tr>')
-                    self.htmlFile.writelines('\n<tr><td>File control parameter</td>')
-                    self.htmlFile.writelines('<td>' + ef['3gGetResponse'] + '</td></tr>')
+                    if ef.has_key('3gGetResponse'):
+                        self.htmlFile.writelines('\n<tr><td>File control parameter</td>')
+                        self.htmlFile.writelines('<td>' + ef['3gGetResponse'] + '</td></tr>')
                     if ef.has_key('fileSize'):
                         self.htmlFile.writelines('\n<tr><td>File size</td>')
                         self.htmlFile.writelines('<td>' + str(ef['fileSize']) + '</td></tr>')
@@ -1211,6 +1213,10 @@ if __name__ == '__main__':
     parser.add_argument("--content3g", action="store_true", help="read content in 3G mode")
     parser.add_argument("-i", "--input", help="file system xml")
     parser.add_argument("-o", "--output", help="script output name")
+    parser.add_argument("--adm1p2", help="custom P2 for ADM1 (2G mode)")
+    parser.add_argument("--adm2p2", help="custom P2 for ADM2 (2G mode)")
+    parser.add_argument("--adm3p2", help="custom P2 for ADM3 (2G mode)")
+    parser.add_argument("--adm4p2", help="custom P2 for ADM4 (2G mode)")
     
     args = parser.parse_args()
 
@@ -1233,6 +1239,10 @@ if __name__ == '__main__':
     chv2 = args.chv2
     pcomOutFileName = args.output
     fileSystemXml = args.input
+    adm1p2 = args.adm1p2
+    adm2p2 = args.adm2p2
+    adm3p2 = args.adm3p2
+    adm4p2 = args.adm4p2
 
     scanner = CardScanner(runAsModule=False, fullScript=False)
 
@@ -1254,6 +1264,14 @@ if __name__ == '__main__':
         scanner.chv1 = chv1
     if chv2:
         scanner.chv2 = chv2
+    if adm1p2:
+        scanner.verify2gAdm1p2 = int(adm1p2, 16)
+    if adm2p2:
+        scanner.verify2gAdm2p2 = int(adm2p2, 16)
+    if adm3p2:
+        scanner.verify2gAdm3p2 = int(adm3p2, 16)
+    if adm4p2:
+        scanner.verify2gAdm4p2 = int(adm4p2, 16)
     
     if pcomOutFileName:
         scanner.pcomOutFileName = pcomOutFileName
