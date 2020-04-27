@@ -269,6 +269,8 @@ class CardScanner:
                 response, sw1, sw2 = self.sendApdu(self.select2g, path[i:]) # shall return 9fxx
             else:
                 response, sw1, sw2 = self.sendApdu(self.select2g, path[i:], out2Pcom=False) # shall return 9fxx
+            if sw1 == 0x94 and sw2 == 0x04:
+                return response, sw1, sw2
             getResponse2g[4] = sw2
             if out2Pcom:
                 response, sw1, sw2 = self.sendApdu(getResponse2g, None)
@@ -727,7 +729,7 @@ class CardScanner:
             }
             td.data {
                 font-family: consolas, Monaco, monospace;
-                font-size: 12px;
+                font-size: 13px;
             }
             ul {
                 margin: 0px;
@@ -1142,7 +1144,6 @@ class CardScanner:
             # dump file system to html
             self.fileSystemOutHtml = self.swapIccid(iccid) + '__' + outTimeStamp + '.html'
             with open(self.fileSystemOutHtml, 'w') as self.htmlFile:
-                # self.htmlFile = open(self.fileSystemOutHtml, 'w')
                 self.createDocumentHeader()
                 self.htmlFile.writelines('\n<div><h1>Card Serial #: ' + self.swapIccid(iccid) + '</h1></div>')
                 for ef in fileDetails:
@@ -1182,7 +1183,7 @@ class CardScanner:
                             recordNumber = 0
                             for record in ef['fileContent']:
                                 recordNumber += 1
-                                self.htmlFile.writelines('\n<tr><td>' + str(recordNumber) + '</td>')
+                                self.htmlFile.writelines('\n<tr><td class="data">' + str(recordNumber) + '</td>')
                                 self.htmlFile.writelines('<td class="data">' + record + '</td></tr>')
                         self.createTableFooter()
                     
