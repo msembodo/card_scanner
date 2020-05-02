@@ -43,8 +43,12 @@ class CardScanner:
     chv1 = '39333033FFFFFFFF'
     chv2 = '39343438FFFFFFFF'
 
+    destinationFolder = '.'
+
     pcomOutFile = None
     pcomOutFileName = 'script.pcom'
+
+    profileBaseName = 'script'
     
     fileSystemXml = ''
     fileSystemOutJson = ''
@@ -481,6 +485,18 @@ class CardScanner:
 
         return True, 'Parsing config.xml complete'
 
+    def parseScriptSettings(self):
+        settingsFile = 'script-settings.json'
+        with open(settingsFile, "r") as json_file:
+            settingsData = json.load(json_file)
+        if settingsData['useSaveFS']:
+            self.fileSystemXml = settingsData['fileSystemXml']
+            saveFsLength = len(self.fileSystemXml)
+            self.profileBaseName = self.fileSystemXml[:saveFsLength-4]
+        else:
+            self.fileSystemXml = ''
+        self.destinationFolder = settingsData['destinationFolder']
+
     def initializeVerifcodeLogBuffer(self, verifcodeMsg):
         self.verifcodeLogBuffer = { \
             'verifcode_msg': verifcodeMsg, \
@@ -749,7 +765,16 @@ class CardScanner:
         self.htmlFile.writelines('\n</tbody></table></div>')
 
     def proceed(self):
-        self.pcomOutFile = open(self.pcomOutFileName, 'w')
+        # when using VerifClient, go with user configuration
+        if self.runAsModule:
+            self.parseConfigXml()
+            self.parseScriptSettings()
+            if self.fullScript:
+                self.pcomOutFileName = self.profileBaseName + '_full.pcom'
+            else:
+                self.pcomOutFileName = self.profileBaseName + '_light.pcom'
+        
+        self.pcomOutFile = open(self.destinationFolder + '\\' + self.pcomOutFileName, 'w')
         
         # power on
         if not self.initSCard() == 0:
@@ -760,10 +785,6 @@ class CardScanner:
         dateTimeNow = datetime.now()
         generation_date = dateTimeNow.strftime("%Y-%m-%d %H:%M")
         self.pcomOutFile.writelines('; Generated with CardScanner on ' + generation_date + '\n')
-
-        # when using VerifClient, go with user configuration
-        if self.runAsModule:
-            self.parseConfigXml()
 
         # verify security codes (2G) for 'full' script
         if self.fullScript:
@@ -1149,12 +1170,12 @@ class CardScanner:
                     iccid = ef['fileContent']
                     break
             outTimeStamp = dateTimeNow.strftime("%Y%m%d%H%M")
-            self.fileSystemOutJson = self.swapIccid(iccid) + '__' + outTimeStamp + '.json'
+            self.fileSystemOutJson = self.destinationFolder + '\\' + self.swapIccid(iccid) + '__' + outTimeStamp + '.json'
             with open(self.fileSystemOutJson, 'w') as json_file:
                 json.dump(fileDetails, json_file, indent=2)
 
             # dump file system to html
-            self.fileSystemOutHtml = self.swapIccid(iccid) + '__' + outTimeStamp + '.html'
+            self.fileSystemOutHtml = self.destinationFolder + '\\' + self.swapIccid(iccid) + '__' + outTimeStamp + '.html'
             with open(self.fileSystemOutHtml, 'w') as self.htmlFile:
                 self.createDocumentHeader()
                 self.htmlFile.writelines('\n<div><h1>Card Serial #: ' + self.swapIccid(iccid) + '</h1></div>')
