@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from xml.dom.minidom import parse
 import json
+import ntpath
 
 logging.basicConfig(level=logging.INFO,
                     format="[%(asctime)s] [%(levelname)s] %(message)s",
@@ -491,8 +492,8 @@ class CardScanner:
             settingsData = json.load(json_file)
         if settingsData['useSaveFS']:
             self.fileSystemXml = settingsData['fileSystemXml']
-            saveFsLength = len(self.fileSystemXml)
-            self.profileBaseName = self.fileSystemXml[:saveFsLength-4]
+            saveFsLength = len(ntpath.basename(self.fileSystemXml))
+            self.profileBaseName = ntpath.basename(self.fileSystemXml)[:saveFsLength-4]
         else:
             self.fileSystemXml = ''
         self.destinationFolder = settingsData['destinationFolder']
@@ -770,9 +771,9 @@ class CardScanner:
             self.parseConfigXml()
             self.parseScriptSettings()
             if self.fullScript:
-                self.pcomOutFileName = self.profileBaseName + '_full.pcom'
+                self.pcomOutFileName = self.profileBaseName + '__full.pcom'
             else:
-                self.pcomOutFileName = self.profileBaseName + '_light.pcom'
+                self.pcomOutFileName = self.profileBaseName + '__light.pcom'
         
         self.pcomOutFile = open(self.destinationFolder + '\\' + self.pcomOutFileName, 'w')
         
