@@ -753,6 +753,8 @@ class CardScanner:
         
         # power on
         if not self.initSCard() == 0:
+            if self.runAsModule:
+                return False, 'Error initializing card'
             sys.exit(-1)
 
         dateTimeNow = datetime.now()
@@ -825,6 +827,8 @@ class CardScanner:
             parseFileSystemOk, parseFileSystemMsg, fileSystemList = self.parseFileSystemXml(self.fileSystemXml)
             if not parseFileSystemOk:
                 logger.error(parseFileSystemMsg)
+                if self.runAsModule:
+                    return False, parseFileSystemMsg
                 sys.exit(-1) # or return with message
         if not supportReadHeader:
             # populate cardFileList from input xml for USIM 1.x or SIMBIOS cards
@@ -836,6 +840,8 @@ class CardScanner:
 
         if len(cardFileList) == 0:
             logger.error('Please provide correct file system xml')
+            if self.runAsModule:
+                return False, 'Please provide correct file system xml'
             sys.exit(-1) # or return with message
 
         # initialize list that contains all files in card and their parameters
@@ -856,6 +862,8 @@ class CardScanner:
                 self.pcomOutFile.writelines('\n; ' + self.formatFileId(ef) + ': ' + fileProperties['fileName'] + '\n')
             else:
                 logger.error('TypeError: probably found AID instead of DF (or path is too long)')
+                if self.runAsModule:
+                    return False, 'TypeError: probably found AID instead of DF (or path is too long)'
                 sys.exit(-1) # or return with message
             sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(ef)
             
@@ -918,6 +926,8 @@ class CardScanner:
                                 rdRec2gResp, rdRec2gSW1, rdRec2gSW2 = self.cmdReadRecord2g(i+1, self.READ_RECORD_ABSOLUTE, fileProperties['fileRecordSize'])
                                 if rdRec2gResp == -1: # possible due to reader communication error
                                     logger.error(rdRec2gSW1) # rdRec2gSW1 contains the error
+                                    if self.runAsModule:
+                                        return False, rdRec2gSW1
                                     sys.exit(-1) # or return with message
                                 else:
                                     if rdRec2gSW1 != 0x90 and rdRec2gSW2 != 00:
@@ -941,6 +951,8 @@ class CardScanner:
                                 rdBin2gResp, rdBin2gSW1, rdBin2gSW2 = self.cmdReadBinary2g(index, tmpLen)
                                 if rdBin2gResp == -1: # possible due to reader communication error
                                     logger.error(rdBin2gSW1) # rdBin2gSW1 contains the error
+                                    if self.runAsModule:
+                                        return False, rdBin2gSW1
                                     sys.exit(-1) # or return with message
                                 else:
                                     if rdBin2gSW1 != 0x90 and rdBin2gSW2 != 00:
@@ -1189,6 +1201,8 @@ class CardScanner:
                     
                 self.htmlFile.writelines('\n<div><i>Generated with CardScanner on ' + generation_date + '</i></div>')
                 self.createDocumentFooter()
+
+        return True, "Scanning success"
 
 # main program
 if __name__ == '__main__':
