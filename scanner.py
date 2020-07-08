@@ -51,6 +51,8 @@ class CardScanner:
 
     profileBaseName = 'script'
     
+    allowReadHeader = False
+    auditOsLocks = False
     fileSystemXml = ''
     fileSystemOutJson = ''
     fileSystemOutHtml = ''
@@ -490,6 +492,8 @@ class CardScanner:
         settingsFile = 'script-settings.json'
         with open(settingsFile, "r") as json_file:
             settingsData = json.load(json_file)
+        self.allowReadHeader = settingsData['allowExOtReadHeader']
+        self.auditOsLocks = settingsData['auditOsLocks']
         if settingsData['useSaveFS']:
             self.fileSystemXml = settingsData['fileSystemXml']
             saveFsLength = len(ntpath.basename(self.fileSystemXml))
@@ -795,54 +799,59 @@ class CardScanner:
         supportReadHeader = True
         cardFileList = ['3F00'] # initiate file list with MF
         curCardFilePath = ''
-        curCardFileType = ''
-        curCardDF = '3F00'
-        curCardFileID = ''
-        curCardIndex = 0
-        prevCardIndex = 0
-        prevCardMFIndex = 0
-        readIndex = 1
-        while readIndex < 256:
-            rdHdrResp, rdHdrSW1, rdHdrSW2 = self.cmdReadHeader(readIndex, 0x04)
-            if rdHdrSW1 == 0x90 and rdHdrSW2 == 0x00:
-                curCardFileID = toHexString(rdHdrResp[0:2])
-                curCardFileID = curCardFileID.replace(" ", "")
-                curCardFilePath = curCardDF + curCardFileID
-                cardFileList.append(curCardFilePath)
-                sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(curCardFilePath, out2Pcom=False)
-                curCardFileType = sel2gResp[6]
-                if curCardFileType == 0x04:
-                    self.cmdSelect2g(curCardDF, out2Pcom=False)
-                else:
-                    if curCardDF == '3F00':
-                        curCardDF = curCardDF + curCardFileID
-                        prevCardMFIndex = curCardIndex
-                        readIndex = 0
+
+        if self.allowReadHeader:
+            logger.info('Performing read header..')
+            curCardFileType = ''
+            curCardDF = '3F00'
+            curCardFileID = ''
+            curCardIndex = 0
+            prevCardIndex = 0
+            prevCardMFIndex = 0
+            readIndex = 1
+            while readIndex < 256:
+                rdHdrResp, rdHdrSW1, rdHdrSW2 = self.cmdReadHeader(readIndex, 0x04)
+                if rdHdrSW1 == 0x90 and rdHdrSW2 == 0x00:
+                    curCardFileID = toHexString(rdHdrResp[0:2])
+                    curCardFileID = curCardFileID.replace(" ", "")
+                    curCardFilePath = curCardDF + curCardFileID
+                    cardFileList.append(curCardFilePath)
+                    sel2gResp, sel2gSW1, sel2gSW2 = self.cmdSelect2g(curCardFilePath, out2Pcom=False)
+                    curCardFileType = sel2gResp[6]
+                    if curCardFileType == 0x04:
+                        self.cmdSelect2g(curCardDF, out2Pcom=False)
                     else:
-                        curCardDF = curCardDF + curCardFileID
-                        prevCardIndex = curCardIndex
-                        readIndex = 0
-            else:
-                if (rdHdrSW1 == 0x94 and rdHdrSW2 == 0x02) or (rdHdrSW1 == 0x6A and rdHdrSW2 == 0x83):
-                    # select parents, no need to check result
-                    path = self.filterHex(curCardDF)
-                    i = 0
-                    while i < (len(path) - 4):
-                        self.sendApdu(self.select2g, path[i:i + 4], out2Pcom=False)
-                        i += 4
-                        curCardDF = path[0:i]
                         if curCardDF == '3F00':
-                            readIndex = prevCardMFIndex + 1
+                            curCardDF = curCardDF + curCardFileID
+                            prevCardMFIndex = curCardIndex
+                            readIndex = 0
                         else:
-                            readIndex = prevCardIndex + 1
+                            curCardDF = curCardDF + curCardFileID
+                            prevCardIndex = curCardIndex
+                            readIndex = 0
                 else:
-                    # read header is not supported by the card
-                    supportReadHeader = False
-                    logger.error('Error reading header at ' + curCardFilePath) # indicate where it fails reading header and exit
-                    break
-            curCardIndex = readIndex
-            readIndex += 1
-        
+                    if (rdHdrSW1 == 0x94 and rdHdrSW2 == 0x02) or (rdHdrSW1 == 0x6A and rdHdrSW2 == 0x83):
+                        # select parents, no need to check result
+                        path = self.filterHex(curCardDF)
+                        i = 0
+                        while i < (len(path) - 4):
+                            self.sendApdu(self.select2g, path[i:i + 4], out2Pcom=False)
+                            i += 4
+                            curCardDF = path[0:i]
+                            if curCardDF == '3F00':
+                                readIndex = prevCardMFIndex + 1
+                            else:
+                                readIndex = prevCardIndex + 1
+                    else:
+                        # read header is not supported by the card
+                        supportReadHeader = False
+                        logger.error('Error reading header at ' + curCardFilePath) # indicate where it fails reading header and exit
+                        break
+                curCardIndex = readIndex
+                readIndex += 1
+        else:
+            supportReadHeader = False
+
         fileSystemXmlAvailable = False
         if self.fileSystemXml != '':
             fileSystemXmlAvailable = True
@@ -1149,17 +1158,18 @@ class CardScanner:
 
             efIndex += 1
 
-        # read OS locks
-        # cycle card
-        self.initSCard()
-        logger.info('Reading OS locks')
-        self.pcomOutFile.writelines('; OS locks\n')
+        if self.auditOsLocks:
+            # read OS locks
+            # cycle card
+            self.initSCard()
+            logger.info('Reading OS locks')
+            self.pcomOutFile.writelines('; OS locks\n')
 
-        osLockBufferCount = self.countLockBuffer()
-        lockOffset = 0
-        while lockOffset < osLockBufferCount:
-            self.cmdReadOsLock(lockOffset, True)
-            lockOffset += 1
+            osLockBufferCount = self.countLockBuffer()
+            lockOffset = 0
+            while lockOffset < osLockBufferCount:
+                self.cmdReadOsLock(lockOffset, True)
+                lockOffset += 1
         
         # print('DEBUG -- fileDetails:')
         # print(fileDetails)
